@@ -1,0 +1,68 @@
+name: Storage feedback XCTest validation
+
+on:
+  push:
+    branches: [validation/storage-feedback-xctest]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  storage-unit-tests:
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 16766
+            source: 76fbd7f89199f62dd9c683631b764c700176cc73
+            test_class: StorageAuthorizerTests
+          - pr: 16771
+            source: 3b0555b6bb19cb9c55cecc026210263e92196b4b
+            test_class: StorageTaskEnqueueTests
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          ref: ${{ matrix.source }}
+          persist-credentials: false
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af
+      - name: Install CocoaPods dependencies
+        run: scripts/setup_bundler.sh
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
+      - name: Create iOS simulator
+        run: scripts/setup_simulator.sh iOS
+      - name: Generate real unit-test workspace
+        run: |
+          bundle exec pod gen FirebaseStorage.podspec --platforms=ios \
+            --local-sources=./ \
+            --sources=https://github.com/firebase/SpecsDev.git,https://github.com/firebase/SpecsStaging.git,https://cdn.cocoapods.org/
+          xcodebuild -list -json \
+            -workspace gen/FirebaseStorage/FirebaseStorage.xcworkspace > unit-workspace.json
+      - name: Test actual Storage regression class
+        env:
+          TEST_CLASS: ${{ matrix.test_class }}
+        run: |
+          xcodebuild \
+            -workspace gen/FirebaseStorage/FirebaseStorage.xcworkspace \
+            -scheme FirebaseStorage-Unit-unit \
+            -destination 'platform=iOS Simulator,name=Firebase-iPhone-15-Pro' \
+            -derivedDataPath /tmp/storage-feedback-derived \
+            -resultBundlePath storage.xcresult \
+            -only-testing:"FirebaseStorage-Unit-unit/$TEST_CLASS" \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=- \
+            COMPILER_INDEX_STORE_ENABLE=NO test 2>&1 | tee storage.log
+      - name: Preserve XCTest results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: storage-feedback-xctest-${{ matrix.pr }}
+          path: |
+            storage.log
+            storage.xcresult
+            unit-workspace.json
