@@ -1,0 +1,58 @@
+name: Database keepalive iOS XCTest
+
+on:
+  push:
+    branches: [validation/database-keepalive-xctest]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  websocket-ios-unit-tests:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af
+      - name: Install CocoaPods dependencies
+        run: scripts/setup_bundler.sh
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
+      - name: Create iOS simulator
+        run: scripts/setup_simulator.sh iOS
+      - name: Generate real Database unit-test workspace
+        run: |
+          bundle exec pod gen FirebaseDatabase.podspec --platforms=ios \
+            --local-sources=./ \
+            --sources=https://github.com/firebase/SpecsDev.git,https://github.com/firebase/SpecsStaging.git,https://cdn.cocoapods.org/
+          xcodebuild -list -json \
+            -workspace gen/FirebaseDatabase/FirebaseDatabase.xcworkspace \
+            > unit-workspace.json
+      - name: Run WebSocket unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace gen/FirebaseDatabase/FirebaseDatabase.xcworkspace \
+            -scheme FirebaseDatabase-Unit-unit \
+            -destination 'platform=iOS Simulator,name=Firebase-iPhone-15-Pro' \
+            -resultBundlePath websocket.xcresult \
+            -only-testing:FirebaseDatabase-Unit-unit/FWebSocketConnectionTest \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO \
+            WARNING_CFLAGS=-Werror=arc-retain-cycles test \
+            2>&1 | tee websocket.log
+          grep -F -- '-Werror=arc-retain-cycles' websocket.log
+          grep -E "Test Suite 'FWebSocketConnectionTest' passed" websocket.log
+          grep -E 'Executed 4 tests, with 0 failures' websocket.log
+      - name: Preserve XCTest results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: database-keepalive-xctest-results
+          path: |
+            websocket.log
+            websocket.xcresult
+            unit-workspace.json
