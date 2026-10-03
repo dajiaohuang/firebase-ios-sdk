@@ -12,6 +12,9 @@ jobs:
   installations-unit-tests:
     runs-on: macos-26
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +49,9 @@ jobs:
         run: |
           build_settings=()
           if [[ "$TEST_PLATFORM" == catalyst ]]; then
-            build_settings+=(SUPPORTS_MACCATALYST=YES TARGETED_DEVICE_FAMILY=2)
+            build_settings+=(SUPPORTS_MACCATALYST=YES TARGETED_DEVICE_FAMILY=2 CODE_SIGNING_ALLOWED=NO)
+          else
+            build_settings+=(CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=-)
           fi
           xcodebuild \
             -workspace gen/FirebaseInstallations/FirebaseInstallations.xcworkspace \
@@ -56,7 +61,7 @@ jobs:
             -resultBundlePath installations.xcresult \
             -only-testing:FirebaseInstallations-Unit-unit/FIRInstallationsTests \
             "${build_settings[@]}" \
-            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO test \
+            COMPILER_INDEX_STORE_ENABLE=NO test \
             2>&1 | tee installations.log
       - name: Preserve XCTest results
         if: always()
