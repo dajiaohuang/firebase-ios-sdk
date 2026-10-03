@@ -8,6 +8,10 @@ jobs:
   local-store:
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    env:
+      CCACHE_DIR: ${{ runner.temp }}/firestore-ccache
+      CCACHE_MAXSIZE: 2G
+      CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
       - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
@@ -16,6 +20,14 @@ jobs:
       - uses: jwlawson/actions-setup-cmake@802fa1a2c4e212495c05bf94dba2704a92a472be
         with:
           cmake-version: '3.31.2'
+      - name: Install compiler cache
+        run: sudo apt-get update && sudo apt-get install -y ccache
+      - uses: actions/cache/restore@9255dc7a253b0ccc959486e2bca901246202afeb
+        id: compiler-cache
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: firestore-local-validation-${{ runner.os }}-${{ github.sha }}
+          restore-keys: firestore-local-validation-${{ runner.os }}-
       - name: Configure and build actual Firestore local tests
         shell: bash
         run: |
@@ -62,3 +74,8 @@ jobs:
         with:
           name: firestore-index-restart-logs
           path: '*.log'
+      - uses: actions/cache/save@9255dc7a253b0ccc959486e2bca901246202afeb
+        if: always() && steps.compiler-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: firestore-local-validation-${{ runner.os }}-${{ github.sha }}
