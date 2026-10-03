@@ -1,0 +1,58 @@
+name: Heartbeat cache XCTest validation
+
+on:
+  push:
+    branches: [validation/heartbeat-cache-xctest]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  heartbeat-unit-tests:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af
+      - name: Install CocoaPods dependencies
+        run: scripts/setup_bundler.sh
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
+      - name: Check pinned SwiftFormat
+        run: |
+          git clone --depth 1 --branch 0.55.5 https://github.com/nicklockwood/SwiftFormat.git /tmp/SwiftFormat
+          swift build --package-path /tmp/SwiftFormat -c release
+          /tmp/SwiftFormat/.build/release/swiftformat --version
+          /tmp/SwiftFormat/.build/release/swiftformat --lint FirebaseCore/Internal/Sources/HeartbeatLogging/HeartbeatStorage.swift --config .swiftformat
+      - name: Create iOS simulator
+        run: scripts/setup_simulator.sh iOS
+      - name: Generate real unit-test workspace
+        run: |
+          bundle exec pod gen FirebaseCoreInternal.podspec --platforms=ios \
+            --local-sources=./ \
+            --sources=https://github.com/firebase/SpecsDev.git,https://github.com/firebase/SpecsStaging.git,https://cdn.cocoapods.org/
+          xcodebuild -list -json \
+            -workspace gen/FirebaseCoreInternal/FirebaseCoreInternal.xcworkspace > unit-workspace.json
+      - name: Test actual heartbeat storage
+        run: |
+          xcodebuild \
+            -workspace gen/FirebaseCoreInternal/FirebaseCoreInternal.xcworkspace \
+            -scheme FirebaseCoreInternal-Unit-Unit \
+            -destination 'platform=iOS Simulator,name=Firebase-iPhone-15-Pro' \
+            -derivedDataPath /tmp/heartbeat-cache-derived \
+            -resultBundlePath heartbeat.xcresult \
+            -only-testing:FirebaseCoreInternal-Unit-Unit/HeartbeatStorageTests \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO test \
+            2>&1 | tee heartbeat.log
+      - name: Preserve XCTest results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: heartbeat-cache-xctest-results
+          path: |
+            heartbeat.log
+            heartbeat.xcresult
+            unit-workspace.json
