@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
-      CCACHE_DIR: ${{ runner.temp }}/firestore-ccache
+      CCACHE_DIR: /tmp/firestore-ccache
       CCACHE_MAXSIZE: 2G
       CCACHE_BASEDIR: ${{ github.workspace }}
     steps:
