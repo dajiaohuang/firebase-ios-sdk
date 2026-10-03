@@ -1,4 +1,4 @@
-name: Database keepalive XCTest
+name: Database keepalive iOS XCTest
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 jobs:
-  websocket-unit-tests:
+  websocket-ios-unit-tests:
     runs-on: macos-26
     timeout-minutes: 60
     steps:
@@ -21,9 +21,11 @@ jobs:
         run: scripts/setup_bundler.sh
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
+      - name: Create iOS simulator
+        run: scripts/setup_simulator.sh iOS
       - name: Generate real Database unit-test workspace
         run: |
-          bundle exec pod gen FirebaseDatabase.podspec --platforms=macos \
+          bundle exec pod gen FirebaseDatabase.podspec --platforms=ios \
             --local-sources=./ \
             --sources=https://github.com/firebase/SpecsDev.git,https://github.com/firebase/SpecsStaging.git,https://cdn.cocoapods.org/
           xcodebuild -list -json \
@@ -34,7 +36,7 @@ jobs:
           xcodebuild \
             -workspace gen/FirebaseDatabase/FirebaseDatabase.xcworkspace \
             -scheme FirebaseDatabase-Unit-unit \
-            -destination 'platform=macOS' \
+            -destination 'platform=iOS Simulator,name=Firebase-iPhone-15-Pro' \
             -resultBundlePath websocket.xcresult \
             -only-testing:FirebaseDatabase-Unit-unit/FWebSocketConnectionTest \
             CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO test \
