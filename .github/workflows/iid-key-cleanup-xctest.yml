@@ -42,7 +42,12 @@ jobs:
       - name: Test actual installations key cleanup
         env:
           TEST_DESTINATION: ${{ matrix.destination }}
+          TEST_PLATFORM: ${{ matrix.platform }}
         run: |
+          build_settings=()
+          if [[ "$TEST_PLATFORM" == catalyst ]]; then
+            build_settings+=(SUPPORTS_MACCATALYST=YES TARGETED_DEVICE_FAMILY=2)
+          fi
           xcodebuild \
             -workspace gen/FirebaseInstallations/FirebaseInstallations.xcworkspace \
             -scheme FirebaseInstallations-Unit-unit \
@@ -50,6 +55,7 @@ jobs:
             -derivedDataPath /tmp/iid-key-cleanup-derived \
             -resultBundlePath installations.xcresult \
             -only-testing:FirebaseInstallations-Unit-unit/FIRInstallationsTests \
+            "${build_settings[@]}" \
             CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO test \
             2>&1 | tee installations.log
       - name: Preserve XCTest results
