@@ -1,0 +1,63 @@
+name: IID key cleanup XCTest validation
+
+on:
+  push:
+    branches: [validation/iid-key-cleanup-xctest]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installations-unit-tests:
+    runs-on: macos-26
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ios
+            destination: platform=iOS Simulator,name=Firebase-iPhone-15-Pro
+          - platform: catalyst
+            destination: platform=macOS,variant=Mac Catalyst
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af
+      - name: Install CocoaPods dependencies
+        run: scripts/setup_bundler.sh
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
+      - name: Create iOS simulator
+        if: matrix.platform == 'ios'
+        run: scripts/setup_simulator.sh iOS
+      - name: Generate real unit-test workspace
+        run: |
+          bundle exec pod gen FirebaseInstallations.podspec --platforms=ios \
+            --local-sources=./ \
+            --sources=https://github.com/firebase/SpecsDev.git,https://github.com/firebase/SpecsStaging.git,https://cdn.cocoapods.org/
+          xcodebuild -list -json \
+            -workspace gen/FirebaseInstallations/FirebaseInstallations.xcworkspace > unit-workspace.json
+      - name: Test actual installations key cleanup
+        env:
+          TEST_DESTINATION: ${{ matrix.destination }}
+        run: |
+          xcodebuild \
+            -workspace gen/FirebaseInstallations/FirebaseInstallations.xcworkspace \
+            -scheme FirebaseInstallations-Unit-unit \
+            -destination "$TEST_DESTINATION" \
+            -derivedDataPath /tmp/iid-key-cleanup-derived \
+            -resultBundlePath installations.xcresult \
+            -only-testing:FirebaseInstallations-Unit-unit/FIRInstallationsTests \
+            CODE_SIGNING_ALLOWED=NO COMPILER_INDEX_STORE_ENABLE=NO test \
+            2>&1 | tee installations.log
+      - name: Preserve XCTest results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: iid-key-cleanup-xctest-${{ matrix.platform }}
+          path: |
+            installations.log
+            installations.xcresult
+            unit-workspace.json
