@@ -1,0 +1,64 @@
+name: Firestore index restart validation
+on:
+  push:
+    branches: [validation/firestore-index-restart]
+permissions:
+  contents: read
+jobs:
+  local-store:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548
+        with:
+          python-version: '3.11'
+      - uses: jwlawson/actions-setup-cmake@802fa1a2c4e212495c05bf94dba2704a92a472be
+        with:
+          cmake-version: '3.31.2'
+      - name: Configure and build actual Firestore local tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install six
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DFIREBASE_IOS_BUILD_TESTS=ON 2>&1 | tee configure.log
+          cmake --build build --target firestore_local_test --parallel 2 2>&1 | tee build.log
+      - name: Verify regressions with the index high-water recovery disabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp Firestore/core/src/local/leveldb_mutation_queue.cc /tmp/patched-queue.cc
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('Firestore/core/src/local/leveldb_mutation_queue.cc')
+          s = p.read_text()
+          start = s.index('  // Batch IDs are global.')
+          end = s.index('  metadata_ = MetadataForKey', start)
+          p.write_text(s[:start] + s[end:])
+          PY
+          cmake --build build --target firestore_local_test --parallel 2 2>&1 | tee before-build.log
+          test_bin=$(find build -type f -name firestore_local_test -executable -print -quit)
+          test -n "$test_bin"
+          set +e
+          "$test_bin" --gtest_filter='LevelDbMutationQueueTest.StartIncludesLargestIndexedBatchIdAcrossUsers:LevelDbLocalStoreRestartTest.IndexedCacheQueryIncludesNewPendingWrite' 2>&1 | tee before.log
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -eq 1
+          grep -F '[  FAILED  ] LevelDbMutationQueueTest.StartIncludesLargestIndexedBatchIdAcrossUsers' before.log
+          grep -F '[  FAILED  ] LevelDbLocalStoreRestartTest.IndexedCacheQueryIncludesNewPendingWrite' before.log
+      - name: Restore the patch and run actual local tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/patched-queue.cc Firestore/core/src/local/leveldb_mutation_queue.cc
+          cmake --build build --target firestore_local_test --parallel 2 2>&1 | tee after-build.log
+          test_bin=$(find build -type f -name firestore_local_test -executable -print -quit)
+          test -n "$test_bin"
+          "$test_bin" 2>&1 | tee after.log
+          grep -F '[       OK ] LevelDbLocalStoreRestartTest.IndexedCacheQueryIncludesNewPendingWrite' after.log
+          grep -F '[       OK ] LevelDbMutationQueueTest.StartIncludesLargestIndexedBatchIdAcrossUsers' after.log
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: firestore-index-restart-logs
+          path: '*.log'
