@@ -1,0 +1,56 @@
+name: Auth refresh XCTest validation
+
+on:
+  push:
+    branches: [validation/auth-refresh-xctest]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  auth-unit-tests:
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          ref: 2b2f9d51e203ce54c6f55a42882bfdd4c9e5080a
+          persist-credentials: false
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af
+      - name: Install CocoaPods dependencies
+        run: scripts/setup_bundler.sh
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_26.4.app/Contents/Developer
+      - name: Create iOS simulator
+        run: scripts/setup_simulator.sh iOS
+      - name: Generate real unit-test workspace
+        run: |
+          bundle exec pod gen FirebaseAuth.podspec --platforms=ios \
+            --local-sources=./ \
+            --sources=https://github.com/firebase/SpecsDev.git,https://github.com/firebase/SpecsStaging.git,https://cdn.cocoapods.org/
+          xcodebuild -list -json \
+            -workspace gen/FirebaseAuth/FirebaseAuth.xcworkspace > unit-workspace.json
+      - name: Test actual Auth refresh coalescer
+        run: |
+          xcodebuild \
+            -workspace gen/FirebaseAuth/FirebaseAuth.xcworkspace \
+            -scheme FirebaseAuth-Unit-unit \
+            -destination 'platform=iOS Simulator,name=Firebase-iPhone-15-Pro' \
+            -derivedDataPath /tmp/auth-refresh-derived \
+            -resultBundlePath auth.xcresult \
+            -only-testing:FirebaseAuth-Unit-unit/TokenRefreshCoalescerTests \
+            CODE_SIGNING_ALLOWED=YES CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=- \
+            COMPILER_INDEX_STORE_ENABLE=NO test 2>&1 | tee auth.log
+      - name: Preserve XCTest results
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: auth-refresh-xctest-results
+          path: |
+            auth.log
+            auth.xcresult
+            unit-workspace.json
